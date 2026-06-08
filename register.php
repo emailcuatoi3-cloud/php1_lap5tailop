@@ -29,8 +29,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $errors[] = "Định dạng Email không hợp lệ!";
         }
-        if (strlen($password) < 6) {
-            $errors[] = "Mật khẩu phải chứa ít nhất 6 ký tự!";
+        if (strlen($password) < 8) {
+            $errors[] = "Mật khẩu phải chứa ít nhất 8 ký tự!";
         }
         if ($password !== $confirm_password) {
             $errors[] = "Nhập lại mật khẩu không trùng khớp!";
@@ -105,7 +105,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
             <div class="form-group">
                 <label>Mật khẩu</label>
-                <input type="password" name="password" placeholder="Tối thiểu 6 ký tự">
+                <input type="password" name="password" placeholder="Tối thiểu 8 ký tự">
             </div>
 
             <div class="form-group">

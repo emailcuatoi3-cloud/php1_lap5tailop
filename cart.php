@@ -34,7 +34,9 @@ foreach($_SESSION['cart'] as $maSPKey => $item){
         } else { unset($_SESSION['cart'][$maSPKey]); continue; }
     }
     $total += $item['price'] * $item['quantity'];
-}
+} 
+
+
 
 // Xử lý ghi nhận Đơn đặt hàng mới vào database
 if(isset($_POST['submit_order'])){
@@ -69,6 +71,7 @@ if(isset($_POST['submit_order'])){
         }
     }
 }
+
 ?>
 <!DOCTYPE html>
 <html lang="vi">
@@ -139,7 +142,7 @@ if(isset($_POST['submit_order'])){
 
     <?php if(!empty($success)){ ?>
     <div class="success-box">
-        <div class="success">🎉 <?= $success ?></div><a href="lap4.php" class="btn" style="background: #2563eb;">Tiếp
+        <div class="success">🎉 <?= $success ?></div><a href="lap4.php" class="btn" style="background: #43567e;">Tiếp
             tục mua sắm</a>
     </div>
     <?php exit(); } ?>
@@ -170,7 +173,16 @@ if(isset($_POST['submit_order'])){
                             <span class="qty-number"><?= $item['quantity'] ?></span>
                             <a href="cart.php?action=increase&id=<?= $item['id'] ?>" class="qty-btn">+</a>
                         </td>
-                        <td style="color: #dc2626; font-weight: bold;"><?= number_format($subtotal) ?> đ</td>
+                        <?php 
+                        // Nếu giá trị lưu trong database là dạng đầy đủ (ví dụ: 500000, 1000000)
+                        $is_red = ($subtotal > 500000); 
+
+                        // HOẶC nếu database của bạn chỉ lưu số rút gọn (ví dụ: Giá là 500 thay vì 500000)
+                        // hãy đổi điều kiện thành: $is_red = ($subtotal > 500);
+                            ?>
+                        <td style="color: <?= $is_red ? '#dc2626' : '#111827' ?>; font-weight: bold;">
+                            <?= number_format($subtotal) ?> đ
+                        </td>
                         <td><a href="cart.php?action=remove&id=<?= $item['id'] ?>" class="delete-btn"
                                 onclick="return confirm('Xóa sản phẩm này?');">❌ Xóa</a></td>
                     </tr>
