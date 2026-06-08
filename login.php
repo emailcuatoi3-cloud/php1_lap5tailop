@@ -22,26 +22,33 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $errors[] = "Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu!";
     } else {
         // Tìm tài khoản theo username hoặc email
-        // Tìm tài khoản theo username hoặc email
         $user = $db_untils->getOne("SELECT * FROM users WHERE username = ? OR email = ?", [$username_or_email, $username_or_email]);
         
         if ($user) {        
-    if (password_verify($password, $user['password'])) {
-        // Đăng nhập thành công, lưu thông tin VÀ QUYỀN vào Session
-        $_SESSION['user'] = [
-            'id'       => $user['id'],
-            'username' => $user['username'],
-            'fullname' => $user['fullname'],
-            'email'    => $user['email'],
-            'role'     => $user['role'] // Lưu quyền (admin hoặc user)
-        ];
-        header("Location: lap4.php");
-        exit();
-    } else {
-        $errors[] = "Mật khẩu không chính xác!";
-    }
-        }
+            if (password_verify($password, $user['password'])) {
+                // Đăng nhập thành công, lưu thông tin VÀ QUYỀN vào Session
+                $_SESSION['user'] = [
+                    'id'       => $user['id'],
+                    'username' => $user['username'],
+                    'fullname' => $user['fullname'],
+                    'email'    => $user['email'],
+                    'role'     => $user['role'] // Lưu quyền (admin hoặc user)
+                ];
+                
+                // Kiểm tra xem nếu trong giỏ hàng đang có sản phẩm thì ưu tiên quay lại trang giỏ hàng để chốt đơn
+                if (isset($_SESSION['cart']) && count($_SESSION['cart']) > 0) {
+                    header("Location: cart.php");
+                } else {
+                    header("Location: lap4.php");
+                }
+                exit();
+            } else {
+                $errors[] = "Mật khẩu không chính xác!";
             }
+        } else {
+            $errors[] = "Tài khoản hoặc email này không tồn tại trên hệ thống!";
+        }
+    }
 }
 ?>
 <!DOCTYPE html>
