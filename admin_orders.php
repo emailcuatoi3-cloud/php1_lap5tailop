@@ -9,11 +9,22 @@ if (!isset($_SESSION['user']) || ($_SESSION['user']['role'] !== 'admin' && $_SES
 }
 
 // Thực hiện thay đổi trạng thái tiến độ đơn hàng
-if (isset($_GET['update_status']) && isset($_GET['order_id'])) {
-    $order_id = (int)$_GET['order_id'];
-    $new_status = $_GET['update_status'];
-    if (in_array($new_status, ['Chờ xác nhận', 'Đang giao', 'Đã nhận', 'Đã hủy'])) {
-        $db_untils->execute("UPDATE orders SET status = ? WHERE id = ?", [$new_status, $order_id]);
+if (isset($_POST['action_update'])) {
+    $order_id = (int)$_POST['order_id'];
+    $new_status = $_POST['status'];
+    $ly_do_huy = isset($_POST['ly_do_huy']) ? trim($_POST['ly_do_huy']) : null;
+    
+    if (in_array($new_status, ['Đang giao', 'Đã nhận', 'Đã hủy'])) {
+        if ($new_status === 'Đã hủy') {
+            // Hoàn lại số lượng tồn kho sản phẩm khi chủ shop chủ động hủy đơn
+            $items = $db_untils->getAll("SELECT product_id, quantity FROM order_details WHERE order_id = ?", [$order_id]);
+            foreach($items as $item) {
+                $db_untils->execute("UPDATE products SET ton_kho = ton_kho + ? WHERE maSP = ?", [$item['quantity'], $item['product_id']]);
+            }
+            $db_untils->execute("UPDATE orders SET status = ?, ly_do_huy = ? WHERE id = ?", [$new_status, "Shop hủy: " . $ly_do_huy, $order_id]);
+        } else {
+            $db_untils->execute("UPDATE orders SET status = ?, ly_do_huy = NULL WHERE id = ?", [$new_status, $order_id]);
+        }
     }
     header("Location: admin_orders.php"); exit();
 }
@@ -64,35 +75,60 @@ $orders = $db_untils->getAll("SELECT * FROM orders ORDER BY id DESC");
         color: #991b1b;
     }
 
-    .action-links a {
-        text-decoration: none;
+    .btn-action-submit {
+        border: none;
         font-size: 13px;
         font-weight: bold;
-        margin-right: 8px;
-        padding: 4px 10px;
+        margin-right: 5px;
+        padding: 5px 10px;
         border-radius: 4px;
+        cursor: pointer;
+        color: white;
         display: inline-block;
     }
 
     .btn-confirm {
         background: #2563eb;
-        color: white;
     }
 
     .btn-ship {
         background: #10b981;
-        color: white;
     }
 
     .btn-cancel {
         background: #ef4444;
-        color: white;
+    }
+
+    .modal-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 2000;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .modal-box {
+        background: white;
+        padding: 25px;
+        border-radius: 8px;
+        width: 400px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }
+
+    .modal-buttons {
+        display: flex;
+        gap: 10px;
+        margin-top: 15px;
     }
     </style>
 </head>
 
 <body>
-
     <header>
         <div class="header-logo">
             <h1>⚙️ Hệ thống Quản trị Đơn hàng</h1>
@@ -131,21 +167,36 @@ $orders = $db_untils->getAll("SELECT * FROM orders ORDER BY id DESC");
                     </td>
                     <td><span style="font-weight: bold; color:#4b5563;"><?= $order['payment_method'] ?></span></td>
                     <td style="color:#dc2626; font-weight:bold;"><?= number_format($order['total_money']) ?> đ</td>
-                    <td><span class="status-badge <?= $badge ?>"><?= $order['status'] ?></span></td>
+                    <td>
+                        <span class="status-badge <?= $badge ?>"><?= $order['status'] ?></span>
+                        <?php if($order['status'] == 'Đã hủy' && !empty($order['ly_do_huy'])) { ?>
+                        <div style="font-size: 11px; color:#dc2626; margin-top:5px; max-width:180px; text-align:left;">
+                            <strong>Thông tin hủy:</strong> <?= htmlspecialchars($order['ly_do_huy']) ?>
+                        </div>
+                        <?php } ?>
+                    </td>
                     <td style="text-align: left; font-size: 13px;">
                         <?php foreach($details as $d) { echo "- " . htmlspecialchars($d['mota']) . " (SL: <strong>" . $d['quantity'] . "</strong>)<br>"; } ?>
                     </td>
-                    <td class="action-links">
+                    <td>
                         <?php if($order['status'] == 'Chờ xác nhận') { ?>
-                        <a href="admin_orders.php?order_id=<?= $order['id'] ?>&update_status=Đang giao"
-                            class="btn-confirm" onclick="return confirm('Duyệt giao đơn này?')">✔ Xác nhận</a>
-                        <a href="admin_orders.php?order_id=<?= $order['id'] ?>&update_status=Đã hủy" class="btn-cancel"
-                            onclick="return confirm('Hủy đơn hàng?')">❌ Hủy</a>
+                        <form method="POST" style="display:inline;">
+                            <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
+                            <input type="hidden" name="status" value="Đang giao">
+                            <button type="submit" name="action_update" class="btn-action-submit btn-confirm"
+                                onclick="return confirm('Duyệt giao đơn này?')">✔ Xác nhận</button>
+                        </form>
+                        <button class="btn-action-submit btn-cancel" onclick="openCancelModal(<?= $order['id'] ?>)">❌
+                            Hủy</button>
                         <?php } elseif($order['status'] == 'Đang giao') { ?>
-                        <a href="admin_orders.php?order_id=<?= $order['id'] ?>&update_status=Đã nhận" class="btn-ship"
-                            onclick="return confirm('Đơn hàng đã giao thành công?')">📦 Đã nhận hàng</a>
-                        <a href="admin_orders.php?order_id=<?= $order['id'] ?>&update_status=Đã hủy" class="btn-cancel"
-                            onclick="return confirm('Hủy đơn hàng?')">❌ Hủy</a>
+                        <form method="POST" style="display:inline;">
+                            <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
+                            <input type="hidden" name="status" value="Đã nhận">
+                            <button type="submit" name="action_update" class="btn-action-submit btn-ship"
+                                onclick="return confirm('Đơn hàng đã giao thành công?')">📦 Đã nhận hàng</button>
+                        </form>
+                        <button class="btn-action-submit btn-cancel" onclick="openCancelModal(<?= $order['id'] ?>)">❌
+                            Hủy</button>
                         <?php } else { echo "<span style='color:#9ca3af; font-size:12px;'>Đơn hoàn thành</span>"; } ?>
                     </td>
                 </tr>
@@ -153,6 +204,37 @@ $orders = $db_untils->getAll("SELECT * FROM orders ORDER BY id DESC");
             </tbody>
         </table>
     </div>
+
+    <div id="cancelModal" class="modal-overlay">
+        <div class="modal-box">
+            <h3>Nhập lý do shop hủy đơn hàng</h3>
+            <form method="POST" action="admin_orders.php">
+                <input type="hidden" name="order_id" id="modal_order_id">
+                <input type="hidden" name="status" value="Đã hủy">
+                <div class="form-group">
+                    <textarea name="ly_do_huy" rows="3" placeholder="Lý do hủy đơn phía cửa hàng..."
+                        required></textarea>
+                </div>
+                <div class="modal-buttons">
+                    <button type="submit" name="action_update" class="btn" style="background:#ef4444; padding:10px;">Xác
+                        nhận hủy đơn</button>
+                    <button type="button" class="btn" style="background:#6b7280; padding:10px;"
+                        onclick="closeCancelModal()">Đóng</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+    function openCancelModal(orderId) {
+        document.getElementById('modal_order_id').value = orderId;
+        document.getElementById('cancelModal').style.display = 'flex';
+    }
+
+    function closeCancelModal() {
+        document.getElementById('cancelModal').style.display = 'none';
+    }
+    </script>
 </body>
 
 </html>

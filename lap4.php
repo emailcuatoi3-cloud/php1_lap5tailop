@@ -30,6 +30,15 @@ if(isset($_GET['success'])){
 if (isset($_GET['action']) && $_GET['action'] === 'add' && isset($_GET['id'])) {
     $pId = $_GET['id'];
     
+    // Kiểm tra số lượng tồn kho trước khi cho thêm vào giỏ
+    $prod = $db_untils->getOne("SELECT ton_kho FROM products WHERE maSP = ?", [$pId]);
+    $currentInCart = isset($_SESSION['cart'][$pId]) ? $_SESSION['cart'][$pId]['quantity'] : 0;
+    
+    if ($prod && $prod['ton_kho'] <= $currentInCart) {
+        echo "<script>alert('Sản phẩm này đã đạt giới hạn số lượng tồn kho tối đa có thể mua!'); window.location.href='lap4.php';</script>";
+        exit();
+    }
+    
     if (isset($_SESSION['cart'][$pId]) && is_array($_SESSION['cart'][$pId])) {
         $_SESSION['cart'][$pId]['quantity']++;
     } else {
@@ -85,21 +94,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $productId = trim($_POST['productId']);
     $description = trim($_POST['description']);
     $price = trim($_POST['price']);
+    $ton_kho = (int)$_POST['ton_kho'];
     $image = trim($_POST['image']);
 
     if (empty($productId)) { $errors[] = "ID không được để trống"; }
     if (empty($price)) { $errors[] = "Giá tiền không được để trống"; }
+    if ($ton_kho < 0) { $errors[] = "Số lượng tồn kho không được âm"; }
 
     if (isset($_POST['update'])) {
         if (count($errors) == 0) {
-            $db_untils->execute("UPDATE products SET mota = ?, gia = ?, hinhAnh = ? WHERE maSP = ?", [$description, $price, $image, $productId]);
+            $db_untils->execute("UPDATE products SET mota = ?, gia = ?, ton_kho = ?, hinhAnh = ? WHERE maSP = ?", [$description, $price, $ton_kho, $image, $productId]);
             header("Location: lap4.php?success=update"); exit();
         }
     } else {
         $check_product = $db_untils->getOne("SELECT * FROM products WHERE maSP = ?", [$productId]);
         if ($check_product) { $errors[] = "Mã sản phẩm đã tồn tại!"; }
         if (count($errors) == 0) {
-            $db_untils->execute("INSERT INTO products (maSP,mota,gia,hinhAnh) VALUES (?,?,?,?)", [$productId, $description, $price, $image]);
+            $db_untils->execute("INSERT INTO products (maSP,mota,gia,ton_kho,hinhAnh) VALUES (?,?,?,?,?)", [$productId, $description, $price, $ton_kho, $image]);
             header("Location: lap4.php?success=add"); exit();
         }
     }
@@ -181,6 +192,13 @@ $totalPages = ceil($totalProducts / $limit);
                     <span class="price-label">Giá bán:</span><span
                         class="amazon-detail-price"><?= number_format($detailProduct['gia'], 0, ',', '.') ?> đ</span>
                 </div>
+                <div style="margin-bottom: 10px; font-size: 14px;">
+                    <strong>Hàng tồn kho còn lại:</strong>
+                    <span
+                        style="color: <?= $detailProduct['ton_kho'] > 0 ? '#007600' : '#dc2626' ?>; font-weight: bold;">
+                        <?= $detailProduct['ton_kho'] > 0 ? $detailProduct['ton_kho'] . ' sản phẩm' : 'Hết hàng' ?>
+                    </span>
+                </div>
                 <div class="divider"></div>
                 <div class="amazon-description-box">
                     <h3>Mô tả chi tiết:</h3>
@@ -189,10 +207,17 @@ $totalPages = ceil($totalProducts / $limit);
             </div>
             <div class="detail-buy-box">
                 <span class="buy-box-price"><?= number_format($detailProduct['gia'], 0, ',', '.') ?> đ</span>
-                <div class="stock-status">Còn hàng</div>
+                <div class="stock-status" style="color: <?= $detailProduct['ton_kho'] > 0 ? '#007600' : '#dc2626' ?>;">
+                    <?= $detailProduct['ton_kho'] > 0 ? 'Còn hàng' : 'Tạm hết hàng' ?>
+                </div>
                 <div class="delivery-text">Giao hàng COD miễn phí toàn quốc nhanh chóng từ 2-3 ngày.</div>
+                <?php if ($detailProduct['ton_kho'] > 0) { ?>
                 <a href="lap4.php?action=add&id=<?= $detailProduct['maSP'] ?>&page=<?= $page ?>&keyword=<?= urlencode($keyword) ?>"
                     class="amazon-cart-btn ajax-add-to-cart">🛒 Thêm vào giỏ hàng</a>
+                <?php } else { ?>
+                <button class="amazon-cart-btn" style="background:#cbd5e1; border-color:#cbd5e1; cursor:not-allowed;"
+                    disabled>❌ Hết hàng</button>
+                <?php } ?>
             </div>
         </div>
     </div>
@@ -210,6 +235,8 @@ $totalPages = ceil($totalProducts / $limit);
                         name="description"><?= $editProduct['mota'] ?? '' ?></textarea></div>
                 <div class="form-group"><label>Giá tiền</label><input type="text" name="price"
                         value="<?= $editProduct['gia'] ?? '' ?>"></div>
+                <div class="form-group"><label>Số lượng tồn kho</label><input type="number" name="ton_kho"
+                        value="<?= $editProduct['ton_kho'] ?? '50' ?>"></div>
                 <div class="form-group"><label>Đường dẫn hình ảnh (URL)</label><input type="url" name="image"
                         value="<?= $editProduct['hinhAnh'] ?? '' ?>"></div>
                 <?php if ($editProduct) { ?><button type="submit" name="update" class="btn-edit-form">Cập nhật sản
@@ -242,6 +269,10 @@ $totalPages = ceil($totalProducts / $limit);
                         <p><strong>ID:</strong> <?= htmlspecialchars($product['maSP']) ?></p>
                         <p><strong>Mô tả:</strong> <?= htmlspecialchars($product['mota']) ?></p>
                         <p class="product-price"><?= number_format($product['gia'], 0, ',', '.') ?> đ</p>
+                        <p style="font-size: 13px; color: #565959;">
+                            Kho: <span
+                                style="font-weight: bold; color: <?= $product['ton_kho'] > 0 ? '#007600' : '#dc2626' ?>;"><?= $product['ton_kho'] > 0 ? $product['ton_kho'] . ' sản phẩm' : 'Hết hàng' ?></span>
+                        </p>
                     </div>
                     <div class="action-group">
                         <a href="?detail=<?= $product['maSP'] ?>&page=<?= $page ?>&keyword=<?= urlencode($keyword) ?>"
@@ -253,8 +284,14 @@ $totalPages = ceil($totalProducts / $limit);
                             onclick="return confirm('Bạn có chắc muốn xóa sản phẩm này?')">Xóa</a>
                         <?php } ?>
                     </div>
+                    <?php if ($product['ton_kho'] > 0) { ?>
                     <a href="lap4.php?action=add&id=<?= $product['maSP'] ?>&page=<?= $page ?>&keyword=<?= urlencode($keyword) ?>"
                         class="amazon-cart-btn ajax-add-to-cart">🛒 Thêm vào giỏ hàng</a>
+                    <?php } else { ?>
+                    <button class="amazon-cart-btn"
+                        style="background:#cbd5e1; border-color:#cbd5e1; margin:15px; cursor:not-allowed;" disabled>❌
+                        Hết hàng</button>
+                    <?php } ?>
                 </div>
                 <?php } ?>
             </div>
@@ -276,6 +313,8 @@ $totalPages = ceil($totalProducts / $limit);
                     const counter = document.getElementById('cart-counter');
                     if (counter) counter.innerText = parseInt(counter.innerText) + 1;
                     alert('Đã thêm sản phẩm vào giỏ hàng thành công! 🎉');
+                } else {
+                    alert('Sản phẩm đã vượt quá giới hạn hàng tồn kho!');
                 }
             });
         });
