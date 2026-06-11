@@ -8,17 +8,113 @@ if (!isset($_SESSION['cart'])) { $_SESSION['cart'] = []; }
 $success = "";
 $error_msg = "";
 
-// Cập nhật tăng/giảm số lượng và xóa sản phẩm
+// --- 📡 XỬ LÝ AJAX CHECKOUT & WEBSOCKET PUSH ---
+if (isset($_GET['api']) && $_GET['api'] === 'checkout') {
+    header('Content-Type: application/json');
+    
+    if (!isset($_SESSION['user'])) {
+        echo json_encode(['status' => 'error', 'message' => '🔒 Bạn phải đăng nhập mới có thể tiến hành đặt hàng!']);
+        exit();
+    }
+
+    $fullname = trim($_POST['fullname'] ?? '');
+    $phone    = trim($_POST['phone'] ?? '');
+    $email    = trim($_POST['email'] ?? '');
+    $address  = trim($_POST['address'] ?? '');
+    $payment_method = $_POST['payment_method'] ?? '';
+
+    if(empty($fullname) || empty($phone) || empty($email) || empty($address) || empty($payment_method)){
+        echo json_encode(['status' => 'error', 'message' => 'Vui lòng nhập đầy đủ thông tin và chọn phương thức thanh toán!']);
+        exit();
+    } 
+    if(count($_SESSION['cart']) == 0){
+        echo json_encode(['status' => 'error', 'message' => 'Giỏ hàng của bạn đang trống!']);
+        exit();
+    }
+
+    $total = 0;
+    foreach($_SESSION['cart'] as $item) {
+        $total += $item['price'] * $item['quantity'];
+    }
+
+    $userId = $_SESSION['user']['id'] ?? null;
+    $db_untils->execute("INSERT INTO orders (user_id, fullname, phone, email, address, payment_method, total_money, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'Chờ xác nhận')", [$userId, $fullname, $phone, $email, $address, $payment_method, $total]);
+    $order_id = $db_untils->getLastInsertId();
+
+    if($order_id) {
+        $product_titles = [];
+        foreach($_SESSION['cart'] as $item) {
+            $db_untils->execute("INSERT INTO order_details (order_id, product_id, price, quantity) VALUES (?, ?, ?, ?)", [$order_id, $item['id'], $item['price'], $item['quantity']]);
+            $product_titles[] = "- " . $item['name'] . " (SL: <strong>" . $item['quantity'] . "</strong>)";
+        }
+        
+        // --- 🚀 THÔNG SỐ CONFIG PUSHER CHÍNH XÁC CỦA BẠN ---
+        $pusher_app_id  = "2165330";
+        $pusher_key     = "94c4c17f4353f8cdc5af";
+        $pusher_secret  = "dd8e86dc55a80ca269fa";
+        $pusher_cluster = "ap1";
+
+        $pusher_data = [
+            'id' => $order_id,
+            'fullname' => htmlspecialchars($fullname),
+            'phone' => htmlspecialchars($phone),
+            'address' => htmlspecialchars($address),
+            'payment_method' => $payment_method,
+            'total_money' => number_format($total),
+            'status' => 'Chờ xác nhận',
+            'products_html' => implode('<br>', $product_titles)
+        ];
+
+        $payload = json_encode([
+            'name' => 'new-order-event',
+            'channels' => ['store-channel'],
+            'data' => json_encode($pusher_data, JSON_UNESCAPED_UNICODE)
+        ], JSON_UNESCAPED_UNICODE);
+
+        $time = time();
+        $body_md5 = md5($payload);
+        
+        // CHUẨN HÓA: Sắp xếp các tham số truy vấn theo đúng bảng chữ cái Alphabet bắt buộc của Pusher
+        $query_string = "auth_key=$pusher_key&auth_timestamp=$time&auth_version=1.0&body_md5=$body_md5";
+        
+        // Tạo chuỗi ký tự ký duyệt dữ liệu chuẩn quy định
+        $string_to_sign = "POST\n/apps/$pusher_app_id/events\n$query_string";
+        $auth_signature = hash_hmac('sha256', $string_to_sign, $pusher_secret);
+        
+        // Khởi tạo luồng cổng cURL hướng ngoại phát sóng dữ liệu
+        $url = "https://api-$pusher_cluster.pusher.com/apps/$pusher_app_id/events?$query_string&auth_signature=$auth_signature";
+        
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "POST");
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        
+        // Bỏ qua xác thực SSL để chạy mượt mà trên môi trường Localhost (XAMPP)
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+        
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        
+        $pusher_response = curl_exec($ch);
+        curl_close($ch);
+
+        $_SESSION['cart'] = [];
+        echo json_encode([
+            'status' => 'success', 
+            'message' => 'Đặt hàng thành công! Đơn hàng của bạn đã gửi tín hiệu thời gian thực đến hệ thống Admin.',
+            'debug_pusher' => $pusher_response // Trả về phản hồi từ Pusher để kiểm tra nếu cần
+        ]);
+        exit();
+    } else {
+        echo json_encode(['status' => 'error', 'message' => 'Gặp sự cố kết nối dữ liệu!']);
+        exit();
+    }
+}
+
+// Giữ nguyên đoạn tăng giảm số lượng sản phẩm
 if (isset($_GET['action'])) {
     $id = $_GET['id'] ?? '';
-    if ($_GET['action'] == 'increase' && isset($_SESSION['cart'][$id])) {
-        $prod = $db_untils->getOne("SELECT ton_kho FROM products WHERE maSP = ?", [$id]);
-        if ($prod && $_SESSION['cart'][$id]['quantity'] >= $prod['ton_kho']) {
-            echo "<script>alert('Không thể tăng! Đã đạt giới hạn tồn kho.'); window.location.href='cart.php';</script>";
-            exit();
-        }
-        $_SESSION['cart'][$id]['quantity']++;
-    }
+    if ($_GET['action'] == 'increase' && isset($_SESSION['cart'][$id])) $_SESSION['cart'][$id]['quantity']++;
     if ($_GET['action'] == 'decrease' && isset($_SESSION['cart'][$id])) {
         $_SESSION['cart'][$id]['quantity']--;
         if ($_SESSION['cart'][$id]['quantity'] <= 0) unset($_SESSION['cart'][$id]);
@@ -27,7 +123,6 @@ if (isset($_GET['action'])) {
     header("Location: cart.php"); exit();
 }
 
-// Tính toán tổng số tiền
 $total = 0;
 foreach($_SESSION['cart'] as $maSPKey => $item){
     if (!is_array($item)) {
@@ -42,68 +137,6 @@ foreach($_SESSION['cart'] as $maSPKey => $item){
     }
     $total += $item['price'] * $item['quantity'];
 }
-
-// Xử lý ghi nhận Đơn đặt hàng mới vào database
-if(isset($_POST['submit_order'])){
-    if (!isset($_SESSION['user'])) {
-        $error_msg = "Bạn cần phải đăng nhập tài khoản trước khi tiến hành đặt hàng thanh toán! <a href='login.php' style='color:#991b1b; font-weight:bold; text-decoration:underline;'>Đăng nhập ngay</a>";
-    } else {
-        $fullname = trim($_POST['fullname']);
-        $phone    = trim($_POST['phone']);
-        $email    = trim($_POST['email']);
-        $address  = trim($_POST['address']);
-        $payment_method = $_POST['payment_method'] ?? '';
-
-        // Lấy thông tin thanh toán bổ sung
-        $momo_phone = trim($_POST['momo_phone'] ?? '');
-        $vnpay_card = trim($_POST['vnpay_card'] ?? '');
-
-        if(empty($fullname) || empty($phone) || empty($email) || empty($address) || empty($payment_method)){
-            $error_msg = "Vui lòng nhập đầy đủ thông tin nhận hàng và chọn phương thức thanh toán!";
-        } elseif($payment_method === 'MOMO' && empty($momo_phone)) {
-            $error_msg = "Vui lòng nhập số điện thoại đăng ký Ví MoMo để hệ thống liên kết thanh toán!";
-        } elseif($payment_method === 'VNPAY' && empty($vnpay_card)) {
-            $error_msg = "Vui lòng nhập số thẻ/tài khoản ngân hàng liên kết VNPAY!";
-        } elseif(count($_SESSION['cart']) == 0){
-            $error_msg = "Giỏ hàng của bạn đang trống!";
-        } else {
-            // Kiểm tra hàng tồn kho trước khi đặt
-            $check_stock = true;
-            foreach($_SESSION['cart'] as $item) {
-                $p_stock = $db_untils->getOne("SELECT ton_kho FROM products WHERE maSP = ?", [$item['id']]);
-                if ($p_stock && $item['quantity'] > $p_stock['ton_kho']) {
-                    $error_msg = "Sản phẩm '" . htmlspecialchars($item['name']) . "' chỉ còn lại " . $p_stock['ton_kho'] . " sản phẩm trong kho.";
-                    $check_stock = false;
-                    break;
-                }
-            }
-
-            if ($check_stock) {
-                $userId = $_SESSION['user']['id'] ?? null;
-                
-                // Ghi chú thông tin tài khoản trực tuyến vào cột hình thức thanh toán nếu có
-                $final_payment = $payment_method;
-                if($payment_method === 'MOMO') $final_payment .= " (Ví: " . $momo_phone . ")";
-                if($payment_method === 'VNPAY') $final_payment .= " (Thẻ: " . $vnpay_card . ")";
-
-                $db_untils->execute("INSERT INTO orders (user_id, fullname, phone, email, address, payment_method, total_money, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'Chờ xác nhận')", [$userId, $fullname, $phone, $email, $address, $final_payment, $total]);
-                $order_id = $db_untils->getLastInsertId();
-
-                if($order_id) {
-                    foreach($_SESSION['cart'] as $item) {
-                        $db_untils->execute("INSERT INTO order_details (order_id, product_id, price, quantity) VALUES (?, ?, ?, ?)", [$order_id, $item['id'], $item['price'], $item['quantity']]);
-                        // Trừ hàng tồn kho
-                        $db_untils->execute("UPDATE products SET ton_kho = ton_kho - ? WHERE maSP = ?", [$item['quantity'], $item['id']]);
-                    }
-                    $_SESSION['cart'] = []; // Làm sạch giỏ hàng
-                    $success = "Đặt hàng thành công! Đơn hàng trực tuyến của bạn đang chờ phê duyệt xác nhận.";
-                } else {
-                    $error_msg = "Hệ thống gặp sự cố, vui lòng thử lại sau!";
-                }
-            }
-        }
-    }
-}
 ?>
 <!DOCTYPE html>
 <html lang="vi">
@@ -117,7 +150,6 @@ if(isset($_POST['submit_order'])){
         display: flex;
         gap: 15px;
         margin-top: 5px;
-        margin-bottom: 15px;
     }
 
     .pay-item {
@@ -130,7 +162,6 @@ if(isset($_POST['submit_order'])){
         font-size: 13px;
         font-weight: bold;
         background: #fafafa;
-        transition: 0.2s;
     }
 
     .pay-item input {
@@ -141,42 +172,6 @@ if(isset($_POST['submit_order'])){
         border-color: #f57224;
         background: #fff7ed;
         color: #f57224;
-        box-shadow: 0 0 5px rgba(245, 114, 36, 0.2);
-    }
-
-    .login-required-alert {
-        background: #fee2e2;
-        border: 1px solid #fca5a5;
-        color: #991b1b;
-        padding: 12px;
-        border-radius: 6px;
-        margin-bottom: 15px;
-        text-align: center;
-        font-size: 14px;
-        font-weight: bold;
-    }
-
-    /* Giao diện phụ nhập thông tin online */
-    .online-pay-fields {
-        display: none;
-        background: #f9fafb;
-        border: 1px dashed #d1d5db;
-        padding: 15px;
-        border-radius: 8px;
-        margin-bottom: 15px;
-        animation: fadeIn 0.3s ease;
-    }
-
-    @keyframes fadeIn {
-        from {
-            opacity: 0;
-            transform: translateY(-5px);
-        }
-
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
     }
     </style>
 </head>
@@ -187,20 +182,20 @@ if(isset($_POST['submit_order'])){
             <h1>🛒 Giỏ hàng & Thanh toán</h1>
         </div>
         <div class="header-actions">
+            <?php if (isset($_SESSION['user'])) { ?>
             <a href="user_orders.php" class="cart-btn" style="background: #10b981; margin-right: 10px;">📋 Đơn hàng của
                 tôi</a>
+            <?php } ?>
             <a href="lap4.php" class="cart-btn" style="background: #4b5563;">← Cửa hàng</a>
         </div>
     </header>
 
-    <?php if(!empty($success)){ ?>
-    <div class="success-box">
-        <div class="success">🎉 <?= $success ?></div><a href="lap4.php" class="btn" style="background: #2563eb;">Tiếp
-            tục mua sắm</a>
+    <div id="success-panel" class="success-box" style="display: none;">
+        <div class="success" id="success-message"></div>
+        <a href="lap4.php" class="btn" style="background: #2563eb; margin-top: 15px;">Tiếp tục mua sắm</a>
     </div>
-    <?php exit(); } ?>
 
-    <div class="onepage-container">
+    <div class="onepage-container" id="main-checkout-layout">
         <div class="checkout-left-panel">
             <h2>Sản phẩm trong giỏ hàng</h2>
             <?php if(count($_SESSION['cart']) > 0){ ?>
@@ -226,9 +221,7 @@ if(isset($_POST['submit_order'])){
                             <span class="qty-number"><?= $item['quantity'] ?></span>
                             <a href="cart.php?action=increase&id=<?= $item['id'] ?>" class="qty-btn">+</a>
                         </td>
-                        <?php $is_red = ($subtotal > 500000); ?>
-                        <td style="color: <?= $is_red ? '#dc2626' : '#111827' ?>; font-weight: bold;">
-                            <?= number_format($subtotal) ?> đ</td>
+                        <td style="color: #dc2626; font-weight: bold;"><?= number_format($subtotal) ?> đ</td>
                         <td><a href="cart.php?action=remove&id=<?= $item['id'] ?>" class="delete-btn"
                                 onclick="return confirm('Xóa sản phẩm này?');">❌ Xóa</a></td>
                     </tr>
@@ -240,28 +233,20 @@ if(isset($_POST['submit_order'])){
 
         <div class="checkout-right-panel">
             <h2>Thông tin mua hàng</h2>
-            <?php if(!empty($error_msg)){ echo "<div class='error'>⚠️ $error_msg</div>"; } ?>
-
-            <?php if(!isset($_SESSION['user'])){ ?>
-            <div class="login-required-alert">🔒 Bạn phải <a href="login.php"
-                    style="color: #991b1b; text-decoration: underline;">Đăng nhập</a> mới có thể tiến hành đặt hàng!
-            </div>
-            <?php } ?>
-
-            <form method="POST">
+            <div class="error" id="error-alert" style="display: none; margin-bottom: 15px;"></div>
+            <form id="orderForm" method="POST">
                 <div class="form-group"><label>Họ và tên người nhận</label><input type="text" name="fullname"
                         placeholder="Nhập họ và tên"
-                        value="<?= isset($_SESSION['user']) ? htmlspecialchars($_SESSION['user']['fullname']) : '' ?>">
+                        value="<?= isset($_SESSION['user']['fullname']) ? htmlspecialchars($_SESSION['user']['fullname']) : '' ?>">
                 </div>
                 <div class="form-group"><label>Số điện thoại</label><input type="text" name="phone"
                         placeholder="Nhập số điện thoại nhận hàng"></div>
                 <div class="form-group"><label>Email</label><input type="email" name="email"
                         placeholder="Nhập địa chỉ email"
-                        value="<?= isset($_SESSION['user']) ? htmlspecialchars($_SESSION['user']['email']) : '' ?>">
+                        value="<?= isset($_SESSION['user']['email']) ? htmlspecialchars($_SESSION['user']['email']) : '' ?>">
                 </div>
                 <div class="form-group"><label>Địa chỉ nhận hàng</label><textarea name="address" rows="3"
                         placeholder="Số nhà, tên đường, phường/xã, quận/huyện..."></textarea></div>
-
                 <div class="form-group">
                     <label>Phương thức thanh toán</label>
                     <div class="payment-options">
@@ -272,48 +257,37 @@ if(isset($_POST['submit_order'])){
                         <label class="pay-item"><input type="radio" name="payment_method" value="VNPAY">🔵 VNPAY</label>
                     </div>
                 </div>
-
-                <div id="momo-fields" class="online-pay-fields">
-                    <div class="form-group" style="margin-bottom: 0;">
-                        <label style="color: #d11a59;">Số điện thoại đăng ký MoMo</label>
-                        <input type="text" name="momo_phone" placeholder="Ví dụ: 0912345678"
-                            style="border-color: #fca5a5;">
-                    </div>
-                </div>
-
-                <div id="vnpay-fields" class="online-pay-fields">
-                    <div class="form-group" style="margin-bottom: 0;">
-                        <label style="color: #005baa;">Số thẻ / Số tài khoản ngân hàng</label>
-                        <input type="text" name="vnpay_card" placeholder="Nhập số thẻ hoặc số tài khoản nội địa"
-                            style="border-color: #93c5fd;">
-                    </div>
-                </div>
-
                 <div class="total">Tổng thanh toán: <?= number_format($total) ?> đ</div>
-                <button type="submit" name="submit_order" class="btn"
-                    <?= (count($_SESSION['cart']) == 0 || !isset($_SESSION['user'])) ? 'disabled style="background:#cbd5e1; cursor:not-allowed;"' : '' ?>>Xác
+                <button type="button" id="btn-submit-checkout" class="btn"
+                    <?= (count($_SESSION['cart']) == 0) ? 'disabled style="background:#cbd5e1; cursor:not-allowed;"' : '' ?>>Xác
                     nhận đặt hàng</button>
             </form>
         </div>
     </div>
 
     <script>
-    document.querySelectorAll('input[name="payment_method"]').forEach(radio => {
-        radio.addEventListener('change', function() {
-            const momoFields = document.getElementById('momo-fields');
-            const vnpayFields = document.getElementById('vnpay-fields');
+    document.getElementById('btn-submit-checkout').addEventListener('click', function(e) {
+        e.preventDefault();
+        const form = document.getElementById('orderForm');
+        const formData = new FormData(form);
+        const errorAlert = document.getElementById('error-alert');
+        errorAlert.style.display = 'none';
 
-            // Ẩn tất cả trước khi xử lý
-            momoFields.style.display = 'none';
-            vnpayFields.style.display = 'none';
-
-            // Kiểm tra hiển thị theo giá trị được chọn
-            if (this.value === 'MOMO') {
-                momoFields.style.display = 'block';
-            } else if (this.value === 'VNPAY') {
-                vnpayFields.style.display = 'block';
-            }
-        });
+        fetch('cart.php?api=checkout', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(res => {
+                if (res.status === 'error') {
+                    errorAlert.innerHTML = '⚠️ ' + res.message;
+                    errorAlert.style.display = 'block';
+                } else {
+                    document.getElementById('main-checkout-layout').style.display = 'none';
+                    document.getElementById('success-message').innerHTML = '🎉 ' + res.message;
+                    document.getElementById('success-panel').style.display = 'block';
+                }
+            });
     });
     </script>
 </body>

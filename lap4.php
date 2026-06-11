@@ -24,13 +24,9 @@ if(isset($_GET['success'])){
     }
 }
 
-// =======================
-// XỬ LÝ THÊM VÀO GIỎ HÀNG KHÔNG ĐỔI TRANG (FALLBACK)
-// =======================
+// XỬ LÝ THÊM VÀO GIỎ HÀNG KHÔNG ĐỔI TRANG
 if (isset($_GET['action']) && $_GET['action'] === 'add' && isset($_GET['id'])) {
     $pId = $_GET['id'];
-    
-    // Kiểm tra số lượng tồn kho trước khi cho thêm vào giỏ
     $prod = $db_untils->getOne("SELECT ton_kho FROM products WHERE maSP = ?", [$pId]);
     $currentInCart = isset($_SESSION['cart'][$pId]) ? $_SESSION['cart'][$pId]['quantity'] : 0;
     
@@ -56,9 +52,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'add' && isset($_GET['id'])) {
     exit();
 }
 
-// =======================
 // XÓA SẢN PHẨM (CHỈ ADMIN)
-// =======================
 if (isset($_GET['delete'])) {
     if (!$isAdmin) { die("BẠN KHÔNG CÓ QUYỀN THỰC HIỆN HÀNH ĐỘNG NÀY!"); }
     $maSP = $_GET['delete'];
@@ -67,9 +61,7 @@ if (isset($_GET['delete'])) {
     exit();
 }
 
-// =======================
 // LẤY THÔNG TIN SỬA (CHỈ ADMIN)
-// =======================
 $editProduct = null;
 if (isset($_GET['edit'])) {
     if (!$isAdmin) { die("BẠN KHÔNG CÓ QUYỀN THỰC HIỆN HÀNH ĐỘNG NÀY!"); }
@@ -77,18 +69,14 @@ if (isset($_GET['edit'])) {
     $editProduct = $db_untils->getOne("SELECT * FROM products WHERE maSP = ?", [$maSP]);
 }
 
-// =======================
 // CHI TIẾT SẢN PHẨM
-// =======================
 $detailProduct = null;
 if (isset($_GET['detail'])) {
     $maSP = $_GET['detail'];
     $detailProduct = $db_untils->getOne("SELECT * FROM products WHERE maSP = ?", [$maSP]);
 }
 
-// =======================
-// XỬ LÝ FORM: THÊM / SỬA (CHỈ ADMIN)
-// =======================
+// XỬ LÝ FORM THÊM / SỬA (CHỈ ADMIN)
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if (!$isAdmin) { die("BẠN KHÔNG CÓ QUYỀN THỰC HIỆN HÀNH ĐỘNG NÀY!"); }
     $productId = trim($_POST['productId']);
@@ -116,9 +104,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     }
 }
 
-// =======================
 // TÌM KIẾM + PHÂN TRANG
-// =======================
 $limit = 6;
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 if ($page < 1) { $page = 1; }
@@ -144,29 +130,63 @@ $totalPages = ceil($totalProducts / $limit);
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cửa hàng sản phẩm</title>
     <link rel="stylesheet" href="./style.css?v=<?= time() ?>">
+    <style>
+    .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .logout-btn-custom {
+        padding: 8px 16px;
+        background: #ef4444;
+        color: white !important;
+        border-radius: 6px;
+        text-decoration: none;
+        font-weight: bold;
+        font-size: 13px;
+        transition: background 0.2s, transform 0.1s;
+    }
+
+    .logout-btn-custom:hover {
+        background: #dc2626;
+        transform: translateY(-1px);
+    }
+    </style>
 </head>
 
 <body>
 
     <header>
         <div class="header-logo">
-            <h1>Hệ Thống Quản Lý Sản Phẩm</h1>
+            <h1 style="cursor: pointer;" onclick="window.location.href='<?= $isAdmin ? 'index.php' : 'lap4.php' ?>'">⚙️
+                Hệ Thống Cửa Hàng</h1>
         </div>
         <div class="header-actions">
-            <div class="user-nav-box">
+            <?php if ($isAdmin) { ?>
+            <a href="index.php" class="cart-btn" style="background: #4b5563;">Về trang chủ</a>
+            <a href="admin_orders.php" class="cart-btn" style="background: #2563eb;">Quản lý đơn hàng</a>
+            <a href="lap4.php" class="cart-btn" style="background: #10b981;">Quản lý sản phẩm</a>
+            <a href="admin_users.php" class="cart-btn" style="background: #f59e0b;">Quản lý user</a>
+            <?php } else { ?>
+            <a href="search_order.php" class="cart-btn" style="background: #0284c7; box-shadow: none;">🔍 Tra cứu đơn
+                hàng</a>
+            <?php } ?>
+
+            <div class="user-nav-box"
+                style="display: inline-flex; align-items: center; gap: 5px; font-size: 14px; color: #fff;">
                 <?php if (isset($_SESSION['user'])) { ?>
-                <span>Xin chào, <strong><?= htmlspecialchars($_SESSION['user']['fullname']) ?></strong>
-                    <span
-                        style="font-size:11px; padding:2px 6px; background:#e0f2fe; color:#0369a1; border-radius:10px; font-weight:bold; text-transform:uppercase;">
-                        <?= htmlspecialchars($_SESSION['user']['role']) ?>
-                    </span></span>
-                <?php if ($isAdmin) { ?>
-                <a href="admin_orders.php" style="color: #16a34a;">📦 Đơn đặt hàng</a>
+                <span>Chào, <strong><?= htmlspecialchars($_SESSION['user']['fullname']) ?></strong></span>
+
+                <?php if (!$isAdmin) { ?>
+                <a href="user_orders.php"
+                    style="color: #10b981; font-weight: bold; text-decoration: none; margin-left: 5px;">📋 Đơn của
+                    tôi</a>
                 <?php } ?>
-                <a href="logout.php" class="btn-logout-link"
-                    onclick="return confirm('Bạn có chắc muốn đăng xuất?')">Đăng xuất</a>
+
+                <a href="logout.php" class="logout-btn-custom" style="margin-left: 5px;">Đăng xuất</a>
                 <?php } else { ?>
-                <a href="login.php">🔑 Đăng nhập</a>
+                <a href="login.php" style="color: #fff; text-decoration: none;">🔑 Đăng nhập</a>
                 <?php } ?>
             </div>
             <a href="cart.php" class="cart-btn">🛒 Giỏ hàng (<span
@@ -175,7 +195,7 @@ $totalPages = ceil($totalProducts / $limit);
     </header>
 
     <?php if ($detailProduct) { ?>
-    <div class="amazon-detail-container">
+    <div class="amazon-detail-container" style="margin-top: 25px;">
         <div class="detail-navigation"><a href="?page=<?= $page ?>&keyword=<?= urlencode($keyword) ?>"
                 class="btn-back-amazon">‹ Quay lại danh sách</a></div>
         <div class="detail-main-layout">
@@ -184,9 +204,6 @@ $totalPages = ceil($totalProducts / $limit);
             </div>
             <div class="detail-info-panel">
                 <h2 class="amazon-title">Sản phẩm mã số: <?= htmlspecialchars($detailProduct['maSP']) ?></h2>
-                <a href="#" class="amazon-brand-link">Ghé thăm cửa hàng Store chính hãng</a>
-                <div class="amazon-rating"><span class="stars">★★★★★</span><span class="rating-count">(4.8 trên 5
-                        sao)</span></div>
                 <div class="divider"></div>
                 <div class="amazon-price-row">
                     <span class="price-label">Giá bán:</span><span
@@ -224,7 +241,7 @@ $totalPages = ceil($totalProducts / $limit);
     <?php } ?>
 
     <?php if (!$detailProduct) { ?>
-    <div class="main-layout">
+    <div class="main-layout" style="margin-top: 25px;">
         <?php if ($isAdmin) { ?>
         <div class="left-panel">
             <form class="product-form" method="POST">

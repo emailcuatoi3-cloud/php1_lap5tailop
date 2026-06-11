@@ -232,6 +232,7 @@ $orders = $db_untils->getAll("SELECT * FROM orders WHERE user_id = ? ORDER BY id
                     <th>Tổng tiền</th>
                     <th>Trạng thái</th>
                     <th>Chi tiết sản phẩm & Hành trình theo dõi</th>
+
                     <th>Thao tác</th>
                 </tr>
             </thead>
@@ -253,6 +254,20 @@ $orders = $db_untils->getAll("SELECT * FROM orders WHERE user_id = ? ORDER BY id
                 ?>
                 <tr>
                     <td><strong>#<?= $order['id'] ?></strong></td>
+                    <td style="text-align: left;">
+                        <div style="font-size: 13px; margin-bottom: 8px;">
+                            <?php foreach($details as $d) { echo "• " . htmlspecialchars($d['mota']) . " (SL: " . $d['quantity'] . ")<br>"; } ?>
+                        </div>
+
+                        <a href="track_order.php?id=<?= $order['id'] ?>" class="status-badge status-shipping"
+                            style="text-decoration:none; margin-bottom: 5px;">
+                            🔍 Xem hành trình kiện hàng ➔
+                        </a>
+
+                        <div class="track-flow">
+                            ...
+                        </div>
+                    </td>
                     <td style="font-size: 13px;"><?= $order['created_at'] ?></td>
                     <td style="color: #dc2626; font-weight: bold;"><?= number_format($order['total_money']) ?> đ</td>
                     <td>
